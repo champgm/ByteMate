@@ -1,1 +1,4 @@
-# Skeleton
+# Build
+```
+gradle distributeExtension
+```
