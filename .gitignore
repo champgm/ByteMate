@@ -1,3 +1,6 @@
+# custom
+bak.classpath
+
 # Gradle
 .gradle/
 build/
@@ -22,6 +25,7 @@ out/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+!.vscode/java-navigate.json
 
 # Compiled class files
 *.class

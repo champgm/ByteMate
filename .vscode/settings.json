@@ -249,5 +249,15 @@
       "F:\\Applications\\ghidra_11.3.1_PUBLIC\\Ghidra\\Processors\\x86\\lib\\x86.jar": "F:\\Applications\\ghidra_11.3.1_PUBLIC\\Ghidra\\Processors\\x86\\lib\\x86-src.zip"
     }
   },
-  "python.analysis.stubPath": "F:\\Applications\\ghidra_11.3.1_PUBLIC\\docs\\ghidra_stubs\\typestubs"
+  "python.analysis.stubPath": "F:\\Applications\\ghidra_11.3.1_PUBLIC\\docs\\ghidra_stubs\\typestubs",
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "java.completion.importOrder": [
+    "java",
+    "javax",
+    "ghidra",
+    ""
+  ],
+  "java.server.launchMode": "Standard",
+  "java.sources.organizeImports.starThreshold": 999,
+  "java.sources.organizeImports.staticStarThreshold": 999
 }
