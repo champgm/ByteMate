@@ -1,5 +1,6 @@
 # custom
 bak.classpath
+.cursor
 
 # Gradle
 .gradle/
