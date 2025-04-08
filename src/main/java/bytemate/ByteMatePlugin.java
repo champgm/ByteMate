@@ -113,8 +113,8 @@ public class ByteMatePlugin extends ProgramPlugin {
     tool.addAction(action);
 
     // Add debug output to verify action registration
-    System.out.println("ByteMatePlugin: Added ByteMate action to Window menu");
-    Msg.info(this, "ByteMatePlugin: Added ByteMate action to Window menu");
+    System.out.println("ByteMatePlugin: Added ByteMate action to Window menu PRINTLN ");
+    Msg.info(this, "ByteMatePlugin: Added ByteMate action to Window menu MSGINFO");
   }
 
   @Override

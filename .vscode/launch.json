@@ -8,7 +8,15 @@
       "mainClass": "ghidra.Ghidra",
       "args": "ghidra.GhidraRun",
       "classPaths": [
-        "F:\\Applications\\ghidra_11.3.1_PUBLIC\\Ghidra\\Framework\\Utility\\lib\\Utility.jar"
+        "F:\\Applications\\ghidra_11.3.1_PUBLIC\\Ghidra\\Framework\\Utility\\lib\\Utility.jar",
+        "${workspaceFolder}\\lib\\annotations-13.0.jar",
+        "${workspaceFolder}\\lib\\gson-2.10.1.jar",
+        "${workspaceFolder}\\lib\\kotlin-stdlib-1.6.20.jar",
+        "${workspaceFolder}\\lib\\kotlin-stdlib-common-1.6.20.jar",
+        "${workspaceFolder}\\lib\\kotlin-stdlib-jdk7-1.5.31.jar",
+        "${workspaceFolder}\\lib\\kotlin-stdlib-jdk8-1.5.31.jar",
+        "${workspaceFolder}\\lib\\okhttp-4.10.0.jar",
+        "${workspaceFolder}\\lib\\okio-jvm-3.0.0.jar",
       ],
       "vmArgs": [
         "-Dghidra.external.modules=${workspaceFolder}",
