@@ -44,13 +44,25 @@ import docking.ComponentProvider;
 import docking.action.DockingAction;
 import docking.action.MenuData;
 import docking.action.ToolBarData;
+import docking.widgets.label.GLabel;
 import ghidra.app.ExamplesPluginPackage;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.plugin.ProgramPlugin;
+import ghidra.app.services.GoToService;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
+import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.FunctionManager;
+import ghidra.program.model.listing.Program;
+import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.util.ProgramLocation;
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
+import ghidra.app.decompiler.DecompileResults;
 import ghidra.util.HelpLocation;
 import ghidra.util.Msg;
+import ghidra.util.task.TaskMonitor;
 import resources.Icons;
 
 /**
@@ -121,6 +133,26 @@ public class ByteMatePlugin extends ProgramPlugin {
   public void init() {
     super.init();
   }
+  
+  @Override
+  protected void programActivated(Program program) {
+    super.programActivated(program);
+    provider.updateProgramContext(program);
+  }
+  
+  @Override
+  protected void programDeactivated(Program program) {
+    super.programDeactivated(program);
+    provider.clearProgramContext();
+  }
+  
+  @Override
+  protected void locationChanged(ProgramLocation loc) {
+    super.locationChanged(loc);
+    if (loc != null && currentProgram != null) {
+      provider.updateFunctionContext(loc);
+    }
+  }
 
   // ByteMate provider to display the chat interface
   private static class ByteMateProvider extends ComponentProvider {
@@ -131,8 +163,16 @@ public class ByteMatePlugin extends ProgramPlugin {
     private JButton sendButton;
     private JComboBox<String> modelSelector;
     private JButton settingsButton;
+    private JPanel contextPanel;
+    private JLabel functionContextLabel;
+    private JLabel programContextLabel;
     private List<ChatMessage> chatHistory = new ArrayList<>();
     private Map<String, Map<String, String>> modelConfigs = new HashMap<>();
+    
+    // Context tracking
+    private Program currentProgram;
+    private Function currentFunction;
+    private String currentDecompiledCode;
 
     // LLM Provider options
     private static final String[] PROVIDERS = {"OpenAI", "Claude", "Google"};
@@ -208,6 +248,33 @@ public class ByteMatePlugin extends ProgramPlugin {
       
       topPanel.add(selectorPanel, BorderLayout.WEST);
       topPanel.add(actionPanel, BorderLayout.EAST);
+      
+      // Context panel to show current function
+      contextPanel = new JPanel(new BorderLayout());
+      contextPanel.setBorder(BorderFactory.createTitledBorder("Current Context"));
+      
+      programContextLabel = new JLabel("Program: Not loaded");
+      programContextLabel.setBorder(new EmptyBorder(2, 5, 2, 5));
+      
+      functionContextLabel = new JLabel("Function: None selected");
+      functionContextLabel.setBorder(new EmptyBorder(2, 5, 2, 5));
+      
+      JPanel contextLabelsPanel = new JPanel(new GridBagLayout());
+      GridBagConstraints gbc = new GridBagConstraints();
+      gbc.gridx = 0;
+      gbc.gridy = 0;
+      gbc.fill = GridBagConstraints.HORIZONTAL;
+      gbc.weightx = 1.0;
+      gbc.insets = new Insets(2, 2, 2, 2);
+      
+      contextLabelsPanel.add(programContextLabel, gbc);
+      
+      gbc.gridy = 1;
+      contextLabelsPanel.add(functionContextLabel, gbc);
+      
+      contextPanel.add(contextLabelsPanel, BorderLayout.CENTER);
+      
+      topPanel.add(contextPanel, BorderLayout.SOUTH);
       
       // Chat display area
       chatPane = new JTextPane();
@@ -382,8 +449,11 @@ public class ByteMatePlugin extends ProgramPlugin {
         // Convert chat history to a format suitable for the API
         String chatHistoryStr = formatChatHistoryForAPI();
         
-        // Make API call
-        LLMService.sendRequest(currentProvider, currentModel, apiKey, userInput, chatHistoryStr)
+        // Prepare context information
+        String contextInfo = getContextInformation();
+        
+        // Make API call with context
+        LLMService.sendRequestWithContext(currentProvider, currentModel, apiKey, userInput, chatHistoryStr, contextInfo)
           .thenAccept(response -> {
             SwingUtilities.invokeLater(() -> {
               // Remove the "thinking" message
@@ -430,6 +500,35 @@ public class ByteMatePlugin extends ProgramPlugin {
         default:
           return "";
       }
+    }
+    
+    private String getContextInformation() {
+      StringBuilder contextBuilder = new StringBuilder();
+      contextBuilder.append("--- CONTEXT INFORMATION ---\n");
+      
+      // Add program context
+      if (currentProgram != null) {
+        contextBuilder.append("Program: ").append(currentProgram.getName()).append("\n");
+        contextBuilder.append("Architecture: ").append(currentProgram.getLanguage().getProcessor().toString()).append("\n");
+        contextBuilder.append("Compiler: ").append(currentProgram.getCompiler()).append("\n");
+      }
+      
+      // Add function context
+      if (currentFunction != null) {
+        contextBuilder.append("\nCurrent Function:\n");
+        contextBuilder.append("Name: ").append(currentFunction.getName()).append("\n");
+        contextBuilder.append("Signature: ").append(currentFunction.getSignature().toString()).append("\n");
+        contextBuilder.append("Address: ").append(currentFunction.getEntryPoint().toString()).append("\n");
+        
+        // Add decompiled code if available
+        if (currentDecompiledCode != null && !currentDecompiledCode.isEmpty()) {
+          contextBuilder.append("\nDecompiled Code:\n");
+          contextBuilder.append("```c\n").append(currentDecompiledCode).append("\n```\n");
+        }
+      }
+      
+      contextBuilder.append("--- END CONTEXT ---\n\n");
+      return contextBuilder.toString();
     }
     
     private void saveSettings() {
@@ -554,6 +653,87 @@ public class ByteMatePlugin extends ProgramPlugin {
             .getSystemClipboard()
             .setContents(new java.awt.datatransfer.StringSelection(text), null);
       }
+    }
+
+    // Update program context when program is activated
+    public void updateProgramContext(Program program) {
+      this.currentProgram = program;
+      if (program != null) {
+        programContextLabel.setText("Program: " + program.getName());
+      } else {
+        programContextLabel.setText("Program: Not loaded");
+        clearFunctionContext();
+      }
+    }
+    
+    // Clear program context when program is deactivated
+    public void clearProgramContext() {
+      this.currentProgram = null;
+      programContextLabel.setText("Program: Not loaded");
+      clearFunctionContext();
+    }
+    
+    // Clear function context
+    private void clearFunctionContext() {
+      this.currentFunction = null;
+      this.currentDecompiledCode = null;
+      functionContextLabel.setText("Function: None selected");
+    }
+    
+    // Update function context when location changes
+    public void updateFunctionContext(ProgramLocation location) {
+      if (location == null || currentProgram == null) {
+        clearFunctionContext();
+        return;
+      }
+      
+      // Get function containing the current location
+      FunctionManager functionManager = currentProgram.getFunctionManager();
+      Function function = functionManager.getFunctionContaining(location.getAddress());
+      
+      if (function != null) {
+        this.currentFunction = function;
+        functionContextLabel.setText("Function: " + function.getName());
+        
+        // Get decompiled code
+        getDecompiledCode(function);
+      } else {
+        clearFunctionContext();
+      }
+    }
+    
+    // Get decompiled code for a function
+    private void getDecompiledCode(Function function) {
+      if (function == null) {
+        currentDecompiledCode = null;
+        return;
+      }
+      
+      SwingUtilities.invokeLater(() -> {
+        try {
+          DecompInterface decompiler = new DecompInterface();
+          DecompileOptions options = new DecompileOptions();
+          decompiler.setOptions(options);
+          
+          // Initialize and set program
+          decompiler.openProgram(currentProgram);
+          
+          // Decompile the function
+          DecompileResults results = decompiler.decompileFunction(function, 30, TaskMonitor.DUMMY);
+          
+          if (results.decompileCompleted()) {
+            // Get the decompiled C code
+            currentDecompiledCode = results.getDecompiledFunction().getC();
+          } else {
+            currentDecompiledCode = "// Decompilation failed";
+          }
+          
+          decompiler.dispose();
+        } catch (Exception e) {
+          Msg.error(this, "Error decompiling function: " + e.getMessage());
+          currentDecompiledCode = "// Error during decompilation: " + e.getMessage();
+        }
+      });
     }
 
     @Override

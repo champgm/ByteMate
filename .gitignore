@@ -1,6 +1,7 @@
 # custom
 bak.classpath
 .cursor
+.prompt.md
 
 # Gradle
 .gradle/
