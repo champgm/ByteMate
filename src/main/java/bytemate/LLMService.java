@@ -3,6 +3,7 @@ package bytemate;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 
+import ghidra.util.Msg;
 import okhttp3.*;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -98,10 +99,10 @@ public class LLMService {
         
         JsonArray messages = new JsonArray();
         
-        // Add system message
+        // Add system message with tool instructions
         JsonObject systemMessage = new JsonObject();
         systemMessage.addProperty("role", "system");
-        systemMessage.addProperty("content", "You are a helpful reverse engineering assistant in Ghidra.");
+        systemMessage.addProperty("content", getSystemPromptWithTools());
         messages.add(systemMessage);
         
         // Add chat history and new prompt
@@ -165,10 +166,10 @@ public class LLMService {
         
         JsonArray messages = new JsonArray();
         
-        // Add system message
+        // Add system message with tool instructions
         JsonObject systemMessage = new JsonObject();
         systemMessage.addProperty("role", "system");
-        systemMessage.addProperty("content", "You are a helpful reverse engineering assistant in Ghidra.");
+        systemMessage.addProperty("content", getSystemPromptWithTools());
         messages.add(systemMessage);
         
         // Add user prompt
@@ -284,20 +285,22 @@ public class LLMService {
         
         JsonArray messages = new JsonArray();
         
-        // Add system message with instructions to use the context
+        // Add system message with tool instructions
         JsonObject systemMessage = new JsonObject();
         systemMessage.addProperty("role", "system");
-        systemMessage.addProperty("content", 
-            "You are a helpful reverse engineering assistant in Ghidra. " +
-            "When provided with context information about the current program and function, " +
-            "use this information to provide more targeted and helpful responses."
-        );
+        systemMessage.addProperty("content", getSystemPromptWithTools());
         messages.add(systemMessage);
         
-        // Add chat history and new prompt
+        // Add chat history
         if (chatHistory != null && !chatHistory.isEmpty()) {
-            // In a real implementation, parse chat history and add to messages
-            // This is a simplified version
+            try {
+                JsonArray historyArray = gson.fromJson(chatHistory, JsonArray.class);
+                for (int i = 0; i < historyArray.size(); i++) {
+                    messages.add(historyArray.get(i));
+                }
+            } catch (Exception e) {
+                Msg.error(LLMService.class, "Error parsing chat history: " + e.getMessage());
+            }
         }
         
         // Add context as a separate system message
@@ -315,6 +318,9 @@ public class LLMService {
         messages.add(userMessage);
         
         requestBody.add("messages", messages);
+        
+        // For debugging
+        Msg.debug(LLMService.class, "Sending OpenAI request with " + messages.size() + " messages");
         
         Request request = new Request.Builder()
             .url("https://api.openai.com/v1/chat/completions")
@@ -357,32 +363,48 @@ public class LLMService {
     }
     
     private static void callClaudeWithContext(String model, String apiKey, String prompt, String contextInfo,
-                                           String chatHistory, CompletableFuture<String> future) {
+                                            String chatHistory, CompletableFuture<String> future) {
         JsonObject requestBody = new JsonObject();
         requestBody.addProperty("model", model);
         
         JsonArray messages = new JsonArray();
         
-        // Add system message with instructions to use the context
+        // Add system message with tool instructions
         JsonObject systemMessage = new JsonObject();
         systemMessage.addProperty("role", "system");
-        systemMessage.addProperty("content", 
-            "You are a helpful reverse engineering assistant in Ghidra. " +
-            "When provided with context information about the current program and function, " +
-            "use this information to provide more targeted and helpful responses."
-        );
+        systemMessage.addProperty("content", getSystemPromptWithTools());
         messages.add(systemMessage);
         
-        // Add user prompt with context
+        // Add chat history
+        if (chatHistory != null && !chatHistory.isEmpty()) {
+            try {
+                JsonArray historyArray = gson.fromJson(chatHistory, JsonArray.class);
+                for (int i = 0; i < historyArray.size(); i++) {
+                    messages.add(historyArray.get(i));
+                }
+            } catch (Exception e) {
+                Msg.error(LLMService.class, "Error parsing chat history: " + e.getMessage());
+            }
+        }
+        
+        // Add context as a separate system message
+        if (contextInfo != null && !contextInfo.isEmpty()) {
+            JsonObject contextMessage = new JsonObject();
+            contextMessage.addProperty("role", "system");
+            contextMessage.addProperty("content", "Current context: " + contextInfo);
+            messages.add(contextMessage);
+        }
+        
+        // Add user prompt
         JsonObject userMessage = new JsonObject();
         userMessage.addProperty("role", "user");
-        
-        // Combine context and prompt for Claude
-        String promptWithContext = contextInfo + "\n\n" + prompt;
-        userMessage.addProperty("content", promptWithContext);
+        userMessage.addProperty("content", prompt);
         messages.add(userMessage);
         
         requestBody.add("messages", messages);
+        
+        // For debugging
+        Msg.debug(LLMService.class, "Sending Claude request with " + messages.size() + " messages");
         
         Request request = new Request.Builder()
             .url("https://api.anthropic.com/v1/messages")
@@ -411,10 +433,10 @@ public class LLMService {
                     
                     if (jsonResponse.has("content") && jsonResponse.getAsJsonArray("content").size() > 0) {
                         String content = jsonResponse.getAsJsonArray("content")
-                                                     .get(0)
-                                                     .getAsJsonObject()
-                                                     .get("text")
-                                                     .getAsString();
+                                                    .get(0)
+                                                    .getAsJsonObject()
+                                                    .get("text")
+                                                    .getAsString();
                         future.complete(content);
                     } else {
                         future.completeExceptionally(new IOException("Invalid response format"));
@@ -425,36 +447,44 @@ public class LLMService {
     }
     
     private static void callGoogleWithContext(String model, String apiKey, String prompt, String contextInfo,
-                                           String chatHistory, CompletableFuture<String> future) {
+                                            String chatHistory, CompletableFuture<String> future) {
         JsonObject requestBody = new JsonObject();
         
         JsonArray contents = new JsonArray();
         
-        // Add system message
+        // Add system message with tool instructions
         JsonObject systemMessage = new JsonObject();
         systemMessage.addProperty("role", "system");
         
         JsonArray systemParts = new JsonArray();
-        JsonObject systemTextObj = new JsonObject();
-        systemTextObj.addProperty("text", 
-            "You are a helpful reverse engineering assistant in Ghidra. " +
-            "When provided with context information about the current program and function, " +
-            "use this information to provide more targeted and helpful responses."
-        );
-        systemParts.add(systemTextObj);
+        JsonObject systemPart = new JsonObject();
+        systemPart.addProperty("text", getSystemPromptWithTools());
+        systemParts.add(systemPart);
         
         systemMessage.add("parts", systemParts);
         contents.add(systemMessage);
         
-        // Add context as separate message
+        // Add chat history
+        if (chatHistory != null && !chatHistory.isEmpty()) {
+            try {
+                JsonArray historyArray = gson.fromJson(chatHistory, JsonArray.class);
+                for (int i = 0; i < historyArray.size(); i++) {
+                    contents.add(historyArray.get(i));
+                }
+            } catch (Exception e) {
+                Msg.error(LLMService.class, "Error parsing chat history: " + e.getMessage());
+            }
+        }
+        
+        // Add context as a separate system message
         if (contextInfo != null && !contextInfo.isEmpty()) {
             JsonObject contextMessage = new JsonObject();
-            contextMessage.addProperty("role", "user");
+            contextMessage.addProperty("role", "system");
             
             JsonArray contextParts = new JsonArray();
-            JsonObject contextTextObj = new JsonObject();
-            contextTextObj.addProperty("text", "Current context: " + contextInfo);
-            contextParts.add(contextTextObj);
+            JsonObject contextPart = new JsonObject();
+            contextPart.addProperty("text", "Current context: " + contextInfo);
+            contextParts.add(contextPart);
             
             contextMessage.add("parts", contextParts);
             contents.add(contextMessage);
@@ -465,14 +495,17 @@ public class LLMService {
         userMessage.addProperty("role", "user");
         
         JsonArray userParts = new JsonArray();
-        JsonObject userTextObj = new JsonObject();
-        userTextObj.addProperty("text", prompt);
-        userParts.add(userTextObj);
+        JsonObject userPart = new JsonObject();
+        userPart.addProperty("text", prompt);
+        userParts.add(userPart);
         
         userMessage.add("parts", userParts);
         contents.add(userMessage);
         
         requestBody.add("contents", contents);
+        
+        // For debugging
+        Msg.debug(LLMService.class, "Sending Google request with " + contents.size() + " messages");
         
         String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey;
         
@@ -516,5 +549,58 @@ public class LLMService {
                 }
             }
         });
+    }
+    
+    /**
+     * Get system prompt with tool instructions
+     * 
+     * @return The system prompt including tool instructions
+     */
+    public static String getSystemPromptWithTools() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are a helpful reverse engineering assistant in Ghidra. ");
+        sb.append("You have access to the following tools that can modify the current program:\n\n");
+        
+        // Code Modification Tools
+        sb.append("## Code Modification Tools\n");
+        sb.append("1. **Rename Function**: Rename the current function to a more meaningful name.\n");
+        sb.append("   - Usage: `rename function to 'newName'`\n\n");
+        
+        sb.append("2. **Add Comments**: Add comments to the current function.\n");
+        sb.append("   - Usage: `add [pre|eol|post|plate] comment 'Your comment text'`\n");
+        sb.append("   - PRE: Comment appears before the instruction\n");
+        sb.append("   - EOL: Comment appears at the end of the line\n");
+        sb.append("   - POST: Comment appears after the instruction\n");
+        sb.append("   - PLATE: Comment appears as a block above the function\n\n");
+        
+        // Future tools (coming soon)
+        sb.append("## Coming Soon\n");
+        sb.append("- Find References: Find all references to a symbol\n");
+        sb.append("- Define Data Types: Create or modify structure definitions\n");
+        sb.append("- Modify Function Signatures: Update function parameter/return types\n\n");
+        
+        // Instructions on how to use tools
+        sb.append("## How to Use Tools\n");
+        sb.append("When a user asks you to perform an action that can be done with these tools, ");
+        sb.append("DO NOT just provide a text response or code. Instead, respond with the appropriate tool command ");
+        sb.append("in your message. For example:\n\n");
+        
+        sb.append("User: \"Please add a comment explaining what this function does\"\n");
+        sb.append("You: \"I'll add a descriptive comment to the function. add plate comment 'This function processes input data and validates it against the schema before storing in the database.'\"\n\n");
+        
+        sb.append("You can use single quotes ('), double quotes (\"), or backticks (`) for the command text, like these examples:\n");
+        sb.append("You: \"I'll add a descriptive comment to the function. add plate comment \"This function processes input data and validates it against the schema before storing in the database.\"\"\n");
+        sb.append("You: \"I'll add a descriptive comment to the function. add plate comment `This function processes input data and validates it against the schema before storing in the database.`\"\n\n");
+        
+        sb.append("User: \"This function should be called processUserInput\"\n");
+        sb.append("You: \"I'll rename the function to be more descriptive. rename function to 'processUserInput'\"\n\n");
+        
+        sb.append("All tool commands will be processed automatically, and you will receive feedback on the success or failure of the operation. ");
+        sb.append("The user must confirm each action before it is executed.\n\n");
+        
+        sb.append("If you're unsure which tool to use or if a specific tool exists for a task, ");
+        sb.append("you can ask the user for clarification or suggest the closest tool that might help.");
+        
+        return sb.toString();
     }
 } 

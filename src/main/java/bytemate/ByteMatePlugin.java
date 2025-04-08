@@ -65,6 +65,11 @@ import ghidra.util.Msg;
 import ghidra.util.task.TaskMonitor;
 import resources.Icons;
 
+// Tools import
+import bytemate.tools.GhidraToolsService;
+import bytemate.tools.ToolCommands;
+import bytemate.tools.ToolCommandParser;
+
 /**
  * ByteMate Plugin with ByteMate window
  */
@@ -173,6 +178,10 @@ public class ByteMatePlugin extends ProgramPlugin {
     private Program currentProgram;
     private Function currentFunction;
     private String currentDecompiledCode;
+    
+    // Command tracking
+    private boolean processingCommand = false;
+    private JCheckBox enableToolsCheckbox;
 
     // LLM Provider options
     private static final String[] PROVIDERS = {"OpenAI", "Claude", "Google"};
@@ -221,6 +230,17 @@ public class ByteMatePlugin extends ProgramPlugin {
       selectorPanel.add(providerSelector);
       selectorPanel.add(new JLabel("Model:"));
       selectorPanel.add(modelSelector);
+      
+      // Add tools checkbox
+      enableToolsCheckbox = new JCheckBox("Enable Tools", true);
+      enableToolsCheckbox.setToolTipText("Allow the LLM to perform actions on the codebase");
+      selectorPanel.add(enableToolsCheckbox);
+      
+      // Add View Tools button
+      JButton viewToolsButton = new JButton("View Tools");
+      viewToolsButton.setToolTipText("View available tools that the LLM can use");
+      viewToolsButton.addActionListener(e -> showAvailableTools());
+      selectorPanel.add(viewToolsButton);
       
       JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
       
@@ -462,6 +482,26 @@ public class ByteMatePlugin extends ProgramPlugin {
               
               // Add the actual response
               addMessageToChat("Assistant", response);
+              
+              // Check if tools are enabled and the response contains a command
+              if (enableToolsCheckbox.isSelected()) {
+                // Try both parsing methods for tool commands
+                if (ToolCommands.containsCommand(response)) {
+                  processToolCommands(response);
+                } else if (ToolCommandParser.containsToolCommands(response)) {
+                  // If the original parser missed it, try the new parser
+                  Msg.info(this, "Using alternative tool command parser");
+                  ToolCommandParser.parseAndExecuteCommands(response, currentProgram, currentFunction)
+                    .thenAccept(result -> {
+                      Msg.info(this, "Tool execution result: " + result);
+                      addMessageToChat("System", result);
+                    }).exceptionally(ex -> {
+                      Msg.error(this, "Error executing tool command: " + ex.getMessage());
+                      addMessageToChat("System", "Error executing tool command: " + ex.getMessage());
+                      return null;
+                    });
+                }
+              }
             });
           })
           .exceptionally(exception -> {
@@ -734,6 +774,241 @@ public class ByteMatePlugin extends ProgramPlugin {
           currentDecompiledCode = "// Error during decompilation: " + e.getMessage();
         }
       });
+    }
+
+    /**
+     * Process commands found in the LLM response.
+     * 
+     * @param response The LLM response
+     */
+    private void processToolCommands(String response) {
+      if (processingCommand) {
+        // Already processing a command, don't start another one
+        Msg.info(this, "Tool command processing skipped - already processing a command");
+        return;
+      }
+      
+      // Extract commands from the response
+      String[] commands = ToolCommands.extractCommands(response);
+      if (commands.length == 0) {
+        Msg.info(this, "No tool commands found in response: " + response.substring(0, Math.min(50, response.length())) + "...");
+        return;
+      }
+      
+      Msg.info(this, "Found " + commands.length + " tool commands to process");
+      for (String cmd : commands) {
+        Msg.info(this, "Command: " + cmd);
+      }
+      
+      processingCommand = true;
+      
+      // Process each command sequentially
+      CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+      
+      for (String command : commands) {
+        future = future.thenCompose(v -> {
+          Msg.info(this, "Processing command: " + command);
+          Map<String, Object> parsedCommand = ToolCommands.processCommand(command);
+          Msg.info(this, "Parsed command type: " + parsedCommand.get("type"));
+          return executeCommand(parsedCommand);
+        });
+      }
+      
+      // When all commands are done, reset processing flag
+      future.thenRun(() -> {
+        Msg.info(this, "All commands processed successfully");
+        processingCommand = false;
+      }).exceptionally(ex -> {
+        Msg.error(this, "Error executing command: " + ex.getMessage());
+        processingCommand = false;
+        addMessageToChat("System", "Error executing command: " + ex.getMessage());
+        return null;
+      });
+    }
+    
+    /**
+     * Execute a parsed command.
+     * 
+     * @param command The parsed command
+     * @return A CompletableFuture that completes when the command is executed
+     */
+    private CompletableFuture<Void> executeCommand(Map<String, Object> command) {
+      String type = (String) command.get("type");
+      
+      if ("UNKNOWN".equals(type)) {
+        Msg.info(this, "Unknown command type, skipping execution");
+        return CompletableFuture.completedFuture(null);
+      }
+      
+      Msg.info(this, "Executing command: " + type + " with params: " + command);
+      
+      switch (type) {
+        case "RENAME_FUNCTION":
+          if (currentFunction != null) {
+            String newName = (String) command.get("newName");
+            Msg.info(this, "Renaming function " + currentFunction.getName() + " to " + newName);
+            return GhidraToolsService.renameFunction(currentProgram, currentFunction, newName)
+              .thenAccept(result -> {
+                Msg.info(this, "Rename result: " + result);
+                addMessageToChat("System", result);
+              }).thenApply(v -> null);
+          } else {
+            Msg.warn(this, "Cannot rename function - no function selected");
+            addMessageToChat("System", "Cannot rename function - no function is currently selected");
+          }
+          break;
+        
+        case "ADD_COMMENT":
+          if (currentFunction != null) {
+            String commentType = (String) command.get("commentType");
+            String commentText = (String) command.get("comment");
+            Msg.info(this, "Adding " + commentType + " comment to function " + currentFunction.getName() + ": " + commentText);
+            return GhidraToolsService.addFunctionComment(currentProgram, currentFunction, commentType, commentText)
+              .thenAccept(result -> {
+                Msg.info(this, "Comment result: " + result);
+                addMessageToChat("System", result);
+              }).thenApply(v -> null);
+          } else {
+            Msg.warn(this, "Cannot add comment - no function selected");
+            addMessageToChat("System", "Cannot add comment - no function is currently selected");
+          }
+          break;
+          
+        case "FIND_REFERENCES":
+          // This functionality will be implemented in a future update
+          Msg.info(this, "Find references command received but not yet implemented");
+          addMessageToChat("System", "Finding references is not yet implemented.");
+          break;
+      }
+      
+      return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Shows a dialog with available tools that the LLM can use
+     */
+    private void showAvailableTools() {
+        JDialog toolsDialog = new JDialog();
+        toolsDialog.setTitle("Available LLM Tools");
+        toolsDialog.setSize(600, 400);
+        toolsDialog.setLocationRelativeTo(mainPanel);
+        toolsDialog.setModal(true);
+        
+        JPanel contentPanel = new JPanel(new BorderLayout());
+        contentPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+        
+        // Create tabbed pane for tool categories
+        JTabbedPane tabbedPane = new JTabbedPane();
+        
+        // Code Modification panel
+        JPanel codeModPanel = new JPanel();
+        codeModPanel.setLayout(new BoxLayout(codeModPanel, BoxLayout.Y_AXIS));
+        
+        addToolInfo(codeModPanel, "Rename Function", 
+                   "Rename the current function to a specified name.", 
+                   "Example: \"rename function to 'processInput'\"");
+        
+        addToolInfo(codeModPanel, "Add Comments", 
+                   "Add comments to the current function or specific addresses.", 
+                   "Example: \"add plate comment 'This function validates user input'\"");
+        
+        // Navigation panel (planned)
+        JPanel navPanel = new JPanel();
+        navPanel.setLayout(new BoxLayout(navPanel, BoxLayout.Y_AXIS));
+        
+        addToolInfo(navPanel, "Find References (Coming Soon)", 
+                   "Find all references to a symbol in the codebase.", 
+                   "Example: \"find references to getData\"");
+        
+        // Analysis panel (planned)
+        JPanel analysisPanel = new JPanel();
+        analysisPanel.setLayout(new BoxLayout(analysisPanel, BoxLayout.Y_AXIS));
+        
+        addToolInfo(analysisPanel, "Data Type Definition (Coming Soon)", 
+                   "Create or modify data type definitions.", 
+                   "Example: \"define structure UserData with fields: id(int), name(char[32])\"");
+        
+        addToolInfo(analysisPanel, "Function Signature (Coming Soon)", 
+                   "Modify function signatures based on analysis.", 
+                   "Example: \"update function signature to 'int process(char *input, size_t len)'\"");
+        
+        // Add panels to tabbed pane
+        tabbedPane.addTab("Code Modification", new JScrollPane(codeModPanel));
+        tabbedPane.addTab("Navigation", new JScrollPane(navPanel));
+        tabbedPane.addTab("Analysis", new JScrollPane(analysisPanel));
+        
+        // Add description at top
+        JTextArea descriptionArea = new JTextArea(
+            "These are the tools available to the LLM assistant. When enabled, the LLM can perform these actions " +
+            "by including commands in its responses. All actions require user confirmation before execution."
+        );
+        descriptionArea.setWrapStyleWord(true);
+        descriptionArea.setLineWrap(true);
+        descriptionArea.setEditable(false);
+        descriptionArea.setBackground(null);
+        descriptionArea.setBorder(new EmptyBorder(0, 0, 10, 0));
+        
+        contentPanel.add(descriptionArea, BorderLayout.NORTH);
+        contentPanel.add(tabbedPane, BorderLayout.CENTER);
+        
+        // Add close button
+        JButton closeButton = new JButton("Close");
+        closeButton.addActionListener(e -> toolsDialog.dispose());
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.add(closeButton);
+        contentPanel.add(buttonPanel, BorderLayout.SOUTH);
+        
+        toolsDialog.setContentPane(contentPanel);
+        toolsDialog.setVisible(true);
+    }
+    
+    /**
+     * Adds tool information to a panel
+     * 
+     * @param panel The panel to add the tool info to
+     * @param toolName The name of the tool
+     * @param description The description of the tool
+     * @param example An example of using the tool
+     */
+    private void addToolInfo(JPanel panel, String toolName, String description, String example) {
+        JPanel toolPanel = new JPanel(new BorderLayout());
+        toolPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, Color.LIGHT_GRAY),
+            new EmptyBorder(10, 5, 10, 5)
+        ));
+        
+        // Tool name in bold
+        JLabel nameLabel = new JLabel(toolName);
+        nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD));
+        
+        // Description
+        JTextArea descArea = new JTextArea(description);
+        descArea.setWrapStyleWord(true);
+        descArea.setLineWrap(true);
+        descArea.setEditable(false);
+        descArea.setBackground(null);
+        
+        // Example in italics
+        JTextArea exampleArea = new JTextArea(example);
+        exampleArea.setFont(exampleArea.getFont().deriveFont(Font.ITALIC));
+        exampleArea.setWrapStyleWord(true);
+        exampleArea.setLineWrap(true);
+        exampleArea.setEditable(false);
+        exampleArea.setBackground(null);
+        exampleArea.setForeground(new Color(100, 100, 100));
+        
+        JPanel textPanel = new JPanel();
+        textPanel.setLayout(new BoxLayout(textPanel, BoxLayout.Y_AXIS));
+        textPanel.add(descArea);
+        textPanel.add(Box.createVerticalStrut(5));
+        textPanel.add(exampleArea);
+        
+        toolPanel.add(nameLabel, BorderLayout.NORTH);
+        toolPanel.add(textPanel, BorderLayout.CENTER);
+        
+        toolPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, toolPanel.getPreferredSize().height));
+        panel.add(toolPanel);
+        panel.add(Box.createVerticalStrut(10));
     }
 
     @Override

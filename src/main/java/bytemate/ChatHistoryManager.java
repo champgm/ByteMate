@@ -68,8 +68,11 @@ public class ChatHistoryManager {
     public static String formatForOpenAI(List<ChatMessage> history) {
         StringBuilder sb = new StringBuilder("[");
         
+        // Get system message with tools info from LLMService
+        String systemPrompt = LLMService.getSystemPromptWithTools();
+        
         // Add system message
-        sb.append("{\"role\":\"system\",\"content\":\"You are a helpful reverse engineering assistant in Ghidra.\"},");
+        sb.append("{\"role\":\"system\",\"content\":\"").append(escapeJson(systemPrompt)).append("\"},");
         
         // Add conversation history
         for (ChatMessage message : history) {
@@ -98,8 +101,11 @@ public class ChatHistoryManager {
     public static String formatForClaude(List<ChatMessage> history) {
         StringBuilder sb = new StringBuilder("[");
         
+        // Get system message with tools info from LLMService
+        String systemPrompt = LLMService.getSystemPromptWithTools();
+        
         // Add system message
-        sb.append("{\"role\":\"system\",\"content\":\"You are a helpful reverse engineering assistant in Ghidra.\"},");
+        sb.append("{\"role\":\"system\",\"content\":\"").append(escapeJson(systemPrompt)).append("\"},");
         
         // Add conversation history
         for (ChatMessage message : history) {
@@ -127,6 +133,12 @@ public class ChatHistoryManager {
      */
     public static String formatForGoogle(List<ChatMessage> history) {
         StringBuilder sb = new StringBuilder("[");
+        
+        // Get system message with tools info from LLMService
+        String systemPrompt = LLMService.getSystemPromptWithTools();
+        
+        // Add system message (for Google models)
+        sb.append("{\"role\":\"system\",\"parts\":[{\"text\":\"").append(escapeJson(systemPrompt)).append("\"}]},");
         
         // Add conversation history
         for (ChatMessage message : history) {
