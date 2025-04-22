@@ -67,7 +67,6 @@ import resources.Icons;
 
 // Tools import
 import bytemate.tools.GhidraToolsService;
-import bytemate.tools.ToolCommands;
 import bytemate.tools.ToolCommandParser;
 
 /**
@@ -182,6 +181,10 @@ public class ByteMatePlugin extends ProgramPlugin {
     // Command tracking
     private boolean processingCommand = false;
     private JCheckBox enableToolsCheckbox;
+    
+    // Store reference to parent plugin and its tool
+    private ByteMatePlugin plugin;
+    private PluginTool pluginTool;
 
     // LLM Provider options
     private static final String[] PROVIDERS = {"OpenAI", "Claude", "Google"};
@@ -195,6 +198,8 @@ public class ByteMatePlugin extends ProgramPlugin {
 
     public ByteMateProvider(Plugin plugin, String owner) {
       super(plugin.getTool(), "ByteMate", owner);
+      this.plugin = (ByteMatePlugin) plugin;
+      this.pluginTool = plugin.getTool();
       initializeModelConfigs();
       buildPanel();
       loadSettings(); // Load saved settings
@@ -485,18 +490,16 @@ public class ByteMatePlugin extends ProgramPlugin {
               
               // Check if tools are enabled and the response contains a command
               if (enableToolsCheckbox.isSelected()) {
-                // Try both parsing methods for tool commands
-                if (ToolCommands.containsCommand(response)) {
-                  processToolCommands(response);
-                } else if (ToolCommandParser.containsToolCommands(response)) {
+                // Use only the ToolCommandParser logic
+                if (ToolCommandParser.containsToolCommands(response)) {
                   // If the original parser missed it, try the new parser
-                  Msg.info(this, "Using alternative tool command parser");
-                  ToolCommandParser.parseAndExecuteCommands(response, currentProgram, currentFunction)
+                  Msg.info(this, "LLM response contains tool commands, attempting to parse and execute.");
+                  ToolCommandParser.parseAndExecuteCommands(response, currentProgram, currentFunction, pluginTool)
                     .thenAccept(result -> {
                       Msg.info(this, "Tool execution result: " + result);
-                      addMessageToChat("System", result);
+                      addMessageToChat("System", "Tool Result: " + result);
                     }).exceptionally(ex -> {
-                      Msg.error(this, "Error executing tool command: " + ex.getMessage());
+                      Msg.error(this, "Error executing tool command: " + ex.getMessage(), ex);
                       addMessageToChat("System", "Error executing tool command: " + ex.getMessage());
                       return null;
                     });
@@ -774,114 +777,6 @@ public class ByteMatePlugin extends ProgramPlugin {
           currentDecompiledCode = "// Error during decompilation: " + e.getMessage();
         }
       });
-    }
-
-    /**
-     * Process commands found in the LLM response.
-     * 
-     * @param response The LLM response
-     */
-    private void processToolCommands(String response) {
-      if (processingCommand) {
-        // Already processing a command, don't start another one
-        Msg.info(this, "Tool command processing skipped - already processing a command");
-        return;
-      }
-      
-      // Extract commands from the response
-      String[] commands = ToolCommands.extractCommands(response);
-      if (commands.length == 0) {
-        Msg.info(this, "No tool commands found in response: " + response.substring(0, Math.min(50, response.length())) + "...");
-        return;
-      }
-      
-      Msg.info(this, "Found " + commands.length + " tool commands to process");
-      for (String cmd : commands) {
-        Msg.info(this, "Command: " + cmd);
-      }
-      
-      processingCommand = true;
-      
-      // Process each command sequentially
-      CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-      
-      for (String command : commands) {
-        future = future.thenCompose(v -> {
-          Msg.info(this, "Processing command: " + command);
-          Map<String, Object> parsedCommand = ToolCommands.processCommand(command);
-          Msg.info(this, "Parsed command type: " + parsedCommand.get("type"));
-          return executeCommand(parsedCommand);
-        });
-      }
-      
-      // When all commands are done, reset processing flag
-      future.thenRun(() -> {
-        Msg.info(this, "All commands processed successfully");
-        processingCommand = false;
-      }).exceptionally(ex -> {
-        Msg.error(this, "Error executing command: " + ex.getMessage());
-        processingCommand = false;
-        addMessageToChat("System", "Error executing command: " + ex.getMessage());
-        return null;
-      });
-    }
-    
-    /**
-     * Execute a parsed command.
-     * 
-     * @param command The parsed command
-     * @return A CompletableFuture that completes when the command is executed
-     */
-    private CompletableFuture<Void> executeCommand(Map<String, Object> command) {
-      String type = (String) command.get("type");
-      
-      if ("UNKNOWN".equals(type)) {
-        Msg.info(this, "Unknown command type, skipping execution");
-        return CompletableFuture.completedFuture(null);
-      }
-      
-      Msg.info(this, "Executing command: " + type + " with params: " + command);
-      
-      switch (type) {
-        case "RENAME_FUNCTION":
-          if (currentFunction != null) {
-            String newName = (String) command.get("newName");
-            Msg.info(this, "Renaming function " + currentFunction.getName() + " to " + newName);
-            return GhidraToolsService.renameFunction(currentProgram, currentFunction, newName)
-              .thenAccept(result -> {
-                Msg.info(this, "Rename result: " + result);
-                addMessageToChat("System", result);
-              }).thenApply(v -> null);
-          } else {
-            Msg.warn(this, "Cannot rename function - no function selected");
-            addMessageToChat("System", "Cannot rename function - no function is currently selected");
-          }
-          break;
-        
-        case "ADD_COMMENT":
-          if (currentFunction != null) {
-            String commentType = (String) command.get("commentType");
-            String commentText = (String) command.get("comment");
-            Msg.info(this, "Adding " + commentType + " comment to function " + currentFunction.getName() + ": " + commentText);
-            return GhidraToolsService.addFunctionComment(currentProgram, currentFunction, commentType, commentText)
-              .thenAccept(result -> {
-                Msg.info(this, "Comment result: " + result);
-                addMessageToChat("System", result);
-              }).thenApply(v -> null);
-          } else {
-            Msg.warn(this, "Cannot add comment - no function selected");
-            addMessageToChat("System", "Cannot add comment - no function is currently selected");
-          }
-          break;
-          
-        case "FIND_REFERENCES":
-          // This functionality will be implemented in a future update
-          Msg.info(this, "Find references command received but not yet implemented");
-          addMessageToChat("System", "Finding references is not yet implemented.");
-          break;
-      }
-      
-      return CompletableFuture.completedFuture(null);
     }
 
     /**

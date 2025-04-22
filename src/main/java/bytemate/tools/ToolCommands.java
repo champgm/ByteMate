@@ -17,6 +17,8 @@ public class ToolCommands {
     private static final String RENAME_FUNCTION_PATTERN = "rename\\s+function\\s+(?:to\\s+)?[\"`']([^\"`']+)[\"`']";
     private static final String ADD_COMMENT_PATTERN = "add\\s+(pre|eol|post|plate)\\s+comment\\s+[\"`']([^\"`']+)[\"`']";
     private static final String FIND_REFERENCES_PATTERN = "find\\s+(?:all\\s+)?references\\s+(?:to\\s+)?([^\\s]+)";
+    private static final String SEARCH_FUNCTIONS_PATTERN = "search\\s+(?:for\\s+)?functions?\\s+(?:with\\s+name\\s+)?[\"`']([^\"`']+)[\"`']";
+    private static final String GO_TO_ADDRESS_PATTERN = "(?:go|jump|navigate)\\s+to\\s+address\\s+[\"`']?([0-9a-fA-Fx]+)[\"`']?";
     
     /**
      * Process a command from the LLM.
@@ -64,6 +66,28 @@ public class ToolCommands {
             return result;
         }
         
+        // Check for search functions command
+        Pattern searchPattern = Pattern.compile(SEARCH_FUNCTIONS_PATTERN, Pattern.CASE_INSENSITIVE);
+        Matcher searchMatcher = searchPattern.matcher(command);
+        if (searchMatcher.find()) {
+            String namePattern = searchMatcher.group(1);
+            Msg.info(ToolCommands.class, "Detected SEARCH_FUNCTIONS command with pattern: " + namePattern);
+            result.put("type", "SEARCH_FUNCTIONS");
+            result.put("namePattern", namePattern);
+            return result;
+        }
+        
+        // Check for go to address command
+        Pattern goToPattern = Pattern.compile(GO_TO_ADDRESS_PATTERN, Pattern.CASE_INSENSITIVE);
+        Matcher goToMatcher = goToPattern.matcher(command);
+        if (goToMatcher.find()) {
+            String address = goToMatcher.group(1);
+            Msg.info(ToolCommands.class, "Detected GO_TO_ADDRESS command with address: " + address);
+            result.put("type", "GO_TO_ADDRESS");
+            result.put("address", address);
+            return result;
+        }
+        
         // If no pattern matches, return unknown command
         Msg.warn(ToolCommands.class, "No matching command pattern found for: " + command);
         result.put("type", "UNKNOWN");
@@ -86,7 +110,9 @@ public class ToolCommands {
         // Check if there are any potential commands in the message
         boolean hasCommand = message.toLowerCase().matches(".*rename\\s+function\\s+to.*") ||
                              message.toLowerCase().matches(".*add\\s+(pre|eol|post|plate)\\s+comment.*") ||
-                             message.toLowerCase().matches(".*find\\s+references.*");
+                             message.toLowerCase().matches(".*find\\s+references.*") ||
+                             message.toLowerCase().matches(".*search\\s+(?:for\\s+)?functions?.*") ||
+                             message.toLowerCase().matches(".*(?:go|jump|navigate)\\s+to\\s+address.*");
         
         Msg.debug(ToolCommands.class, "Message " + (hasCommand ? "contains" : "does not contain") + " command patterns");
         
@@ -100,6 +126,12 @@ public class ToolCommands {
             }
             if (message.toLowerCase().matches(".*find\\s+references.*")) {
                 Msg.debug(ToolCommands.class, "Found 'find references' pattern");
+            }
+            if (message.toLowerCase().matches(".*search\\s+(?:for\\s+)?functions?.*")) {
+                Msg.debug(ToolCommands.class, "Found 'search functions' pattern");
+            }
+            if (message.toLowerCase().matches(".*(?:go|jump|navigate)\\s+to\\s+address.*")) {
+                Msg.debug(ToolCommands.class, "Found 'go to address' pattern");
             }
         }
         
@@ -129,7 +161,9 @@ public class ToolCommands {
             .filter(line -> {
                 boolean isCommand = line.toLowerCase().matches(".*rename\\s+function\\s+to.*") ||
                                    line.toLowerCase().matches(".*add\\s+(pre|eol|post|plate)\\s+comment.*") ||
-                                   line.toLowerCase().matches(".*find\\s+references.*");
+                                   line.toLowerCase().matches(".*find\\s+references.*") ||
+                                   line.toLowerCase().matches(".*search\\s+(?:for\\s+)?functions?.*") ||
+                                   line.toLowerCase().matches(".*(?:go|jump|navigate)\\s+to\\s+address.*");
                 
                 if (isCommand) {
                     Msg.debug(ToolCommands.class, "Found command in line: " + line);

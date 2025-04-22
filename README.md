@@ -1,3 +1,5 @@
+# Warning: This is 90% Vibe coded
+
 # ByteMate - LLM-powered Assistant for Ghidra
 
 ByteMate is a Ghidra plugin that integrates large language models (LLMs) to assist with reverse engineering tasks. The plugin provides a chat interface similar to GitHub Copilot or Cursor, allowing you to interact with various LLM providers directly within Ghidra.
