@@ -2,41 +2,51 @@
 
 # ByteMate - LLM-powered Assistant for Ghidra
 
-ByteMate is a Ghidra plugin that integrates large language models (LLMs) to assist with reverse engineering tasks. The plugin provides a chat interface similar to GitHub Copilot or Cursor, allowing you to interact with various LLM providers directly within Ghidra.
+ByteMate is a Ghidra plugin that integrates large language models (LLMs) to assist with reverse engineering tasks. The plugin provides a chat interface directly within Ghidra, allowing you to interact with various AI models while maintaining context awareness of your current program and function.
 
 ## Features
 
-- Chat interface for interacting with LLMs
-- Support for multiple providers:
-  - OpenAI models (GPT-4o, GPT-4-turbo, GPT-3.5-turbo)
-  - Anthropic models (Claude 3 Opus, Claude 3 Sonnet, Claude 3 Haiku)
-  - Google models (Gemini Pro, Gemini Ultra)
-- Code block extraction and copying
-- Persistent chat history
-- Secure API key storage
+- **Interactive Chat Interface**: Communicate with AI models directly within Ghidra
+- **Multi-Provider Support**:
+  - OpenAI (GPT-4o, GPT-4-turbo, GPT-3.5-turbo)
+  - Anthropic (Claude 3 Opus, Claude 3 Sonnet, Claude 3 Haiku)
+  - Google (Gemini Pro, Gemini Ultra)
+- **Context-Aware Assistant**: Automatically includes relevant program and function information
+- **Specialized Tools**: Access Ghidra-specific tools and commands through the chat interface
+- **Code Block Handling**: Extract and copy code blocks from responses
+- **Persistent Chat History**: Save and reload your conversation history
+- **Secure API Key Management**: Safely store your API credentials
 
-## Build
+## Building
+
 ```
 gradle distributeExtension
 ```
+The extension will be created in the `dist` directory after building.
+
+## Testing
+
+To test the plugin, press F5 in VSCode to launch Ghidra. You may need to enable the plugin by opening a Code Browser window and then choosing `File -> Configure` from the menus. Find the "Examples" category of plugins, then toggle this plugin to enabled. 
+
 
 ## Installation
 
-1. The extension will be created in the `dist` directory after building.
-2. In Ghidra, go to File → Install Extensions.
-3. Click the "+" button and select the ByteMate ZIP file from the `dist` directory.
-4. Restart Ghidra.
+1. In Ghidra, go to File → Install Extensions
+2. Click the "+" button and select the ByteMate ZIP file from the `dist` directory
+3. Restart Ghidra
 
 ## Usage
 
-1. Open ByteMate from the Window menu in Ghidra.
-2. Configure your API keys in the Settings dialog.
-3. Select your desired LLM provider and model.
-4. Type your questions or commands in the input box and click Send.
+1. Open ByteMate from the Window menu in Ghidra
+2. Configure your API keys in the Settings dialog
+3. Select your preferred LLM provider and model
+4. Type your questions or commands in the input box and click Send
+
+The assistant can provide insights about your current function and decompiled code, making reverse engineering tasks more efficient.
 
 ## API Keys
 
-You'll need to provide your own API keys for the LLM providers. These can be obtained from:
+You'll need to provide your own API keys for the LLM providers:
 
 - OpenAI: https://platform.openai.com/
 - Anthropic (Claude): https://console.anthropic.com/
@@ -44,11 +54,10 @@ You'll need to provide your own API keys for the LLM providers. These can be obt
 
 ## Development
 
-This project was started on a template project created by Ghidra, the reverse engineering tool, from a Ghidra CodeBrowser window using the menu options Tools -> Create VSCode Module project.
-
-Required dependencies:
-- OkHttp (for API calls)
-- Gson (for JSON processing)
+The project is built on Ghidra's plugin architecture and uses:
+- OkHttp for API requests
+- Gson for JSON processing
+- Ghidra's decompiler API for context extraction
 
 ## License
 
